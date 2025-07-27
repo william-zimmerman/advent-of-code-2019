@@ -2,42 +2,43 @@
 
 module Day5 (runDay5) where
 
+import Data.Char (digitToInt)
 import Data.List.Split (splitOn)
-import Data.Maybe (fromJust)
-import Debug.Trace (trace)
 
 type Address = Int
 type AddressableList a = [(Address, a)]
 type AddressableMemory = AddressableList Int
 
-data ParameterMode = Position | Immediate
+data ParameterMode = Position | Immediate deriving (Show)
 
 type InstructionParameter = Int
-type InstructionParameterTriple = (InstructionParameter, InstructionParameter, InstructionParameter)
+type ParameterAndMode = (InstructionParameter, ParameterMode)
 
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
 
-data Instruction = Add | Multiply | Halt
+data Instruction = Add | Multiply | Halt | Read | Write
 
-type InstructionAndParameters = (Instruction, [InstructionParameter])
+type InstructionAndParameters = (Instruction, [ParameterAndMode])
 
 numberOfParams :: Instruction -> Int
 numberOfParams Add = 3
 numberOfParams Multiply = 3
 numberOfParams Halt = 0
+numberOfParams Read = 1
+numberOfParams Write = 1
 
-runProgram :: (Int, Int) -> AddressableMemory -> AddressableMemory
+runProgram :: (Int, Int) -> AddressableMemory -> Maybe AddressableMemory
 runProgram initialInputs memory =
     let adjustedMemory = replace 2 (snd initialInputs) (replace 1 (fst initialInputs) memory)
      in recurseProgram start adjustedMemory
 
-recurseProgram :: InstructionPointer -> AddressableMemory -> AddressableMemory
-recurseProgram instructionPointer memory =
-    let maybeInstructionAndParams = getInstructionAndParams instructionPointer memory
-     in case maybeInstructionAndParams of
-            Nothing -> trace ("Unable to parse instruction at address " <> show instructionPointer) memory
-            Just (Halt, _) -> trace ("Program halted from instruction at address " <> show instructionPointer) memory
-            Just instructionAndParams@(instruction, _) -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction instructionAndParams memory)
+recurseProgram :: InstructionPointer -> AddressableMemory -> Maybe AddressableMemory
+recurseProgram instructionPointer memory = do
+    (instruction, parameterAndModes) <- getInstructionAndParams instructionPointer memory
+    inputs <- resolveParameters parameterAndModes memory
+    case instruction of
+        Halt -> Just memory
+        other -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction other inputs memory)
 
 start :: InstructionPointer
 start = MkInstructionPointer 0
@@ -54,15 +55,34 @@ replace position newValue ((p', currentValue) : xs)
 getInstructionAndParams :: InstructionPointer -> AddressableMemory -> Maybe InstructionAndParameters
 getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory = do
     opcode <- lookup address memory
-    instruction <- parseOpcode opcode
+    (instruction, parameterModes) <- parseOpcode opcode
     parameters <- getInstructionParams instruction instructionPointer memory
-    return (instruction, parameters)
+    let parametersAndModes = zip parameters (parameterModes <> repeat Position)
+    return (instruction, parametersAndModes)
 
-parseOpcode :: Int -> Maybe Instruction
-parseOpcode 1 = Just Add
-parseOpcode 2 = Just Multiply
-parseOpcode 99 = Just Halt
-parseOpcode _ = Nothing
+parseOpcode :: Int -> Maybe (Instruction, [ParameterMode])
+parseOpcode value = do
+    let opcode = value `mod` 100
+    let modeInts = value `div` 100
+    instruction <- parseInstruction opcode
+    parameterModes <- parseModes modeInts
+    return (instruction, parameterModes)
+
+parseInstruction :: Int -> Maybe Instruction
+parseInstruction 1 = Just Add
+parseInstruction 2 = Just Multiply
+parseInstruction 99 = Just Halt
+parseInstruction _ = Nothing
+
+parseModes :: Int -> Maybe [ParameterMode]
+parseModes value =
+    let valueAsString = show value
+     in mapM (parseMode . digitToInt) (reverse valueAsString)
+
+parseMode :: Int -> Maybe ParameterMode
+parseMode 0 = Just Position
+parseMode 1 = Just Immediate
+parseMode _ = Nothing
 
 getInstructionParams :: Instruction -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
 getInstructionParams instruction (MkInstructionPointer address) memory =
@@ -78,18 +98,26 @@ nextInstructionPointer :: Instruction -> InstructionPointer -> InstructionPointe
 nextInstructionPointer instruction (MkInstructionPointer address) =
     MkInstructionPointer (address + numberOfParams instruction + 1)
 
-applyInstruction :: InstructionAndParameters -> AddressableMemory -> AddressableMemory
-applyInstruction (Add, params) memory = applyInstructionParams3 (+) params memory
-applyInstruction (Multiply, params) memory = applyInstructionParams3 (*) params memory
-applyInstruction (Halt, _) memory = memory
+applyInstruction :: Instruction -> [Int] -> AddressableMemory -> AddressableMemory
+applyInstruction Add inputs memory = applyInstructionParams3 (+) inputs memory
+applyInstruction Multiply inputs memory = applyInstructionParams3 (*) inputs memory
+applyInstruction Halt _ memory = memory
+applyInstruction Read _ memory = undefined
+applyInstruction Write _ memory = undefined
 
-applyInstructionParams3 :: (a -> a -> a) -> [InstructionParameter] -> AddressableList a -> AddressableList a
-applyInstructionParams3 f parameters list =
-    let inputAddress1 = head parameters
-        inputAddress2 = parameters !! 1
-        outputAddress = parameters !! 2
-        maybeInputValues = (,) <$> lookup inputAddress1 list <*> lookup inputAddress2 list
-        computedValue = uncurry f (fromJust maybeInputValues)
+resolveParameters :: [ParameterAndMode] -> AddressableMemory -> Maybe [Int]
+resolveParameters paramsAndModes memory = mapM (resolveParameter memory) paramsAndModes
+
+resolveParameter :: AddressableMemory -> ParameterAndMode -> Maybe Int
+resolveParameter _ (value, Immediate) = Just value
+resolveParameter memory (address, Position) = lookup address memory
+
+applyInstructionParams3 :: (Int -> Int -> Int) -> [Int] -> AddressableList Int -> AddressableList Int
+applyInstructionParams3 f inputs list =
+    let input1 = head inputs
+        input2 = inputs !! 1
+        outputAddress = inputs !! 2
+        computedValue = f input1 input2
      in replace outputAddress computedValue list
 
 getAnswer :: AddressableList a -> Maybe a
