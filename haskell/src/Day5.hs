@@ -17,15 +17,14 @@ type InstructionParameterTriple = (InstructionParameter, InstructionParameter, I
 
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
 
-data Instruction = Add InstructionParameterTriple | Multiply InstructionParameterTriple | Halt
+data Instruction = Add | Multiply | Halt
 
-runDay5 :: IO ()
-runDay5 = do
-    strings <- concatMap (splitOn ",") . lines <$> readFile "resources/day5.txt"
-    let ints :: [Int] = map read strings
-    let memory = createAddressableList ints
-    print memory
-    return ()
+type InstructionAndParameters = (Instruction, [InstructionParameter])
+
+numberOfParams :: Instruction -> Int
+numberOfParams Add = 3
+numberOfParams Multiply = 3
+numberOfParams Halt = 0
 
 runProgram :: (Int, Int) -> AddressableMemory -> AddressableMemory
 runProgram initialInputs memory =
@@ -34,16 +33,11 @@ runProgram initialInputs memory =
 
 recurseProgram :: InstructionPointer -> AddressableMemory -> AddressableMemory
 recurseProgram instructionPointer memory =
-    let maybeInstruction = getInstruction instructionPointer memory
-     in case maybeInstruction of
+    let maybeInstructionAndParams = getInstructionAndParams instructionPointer memory
+     in case maybeInstructionAndParams of
             Nothing -> trace ("Unable to parse instruction at address " <> show instructionPointer) memory
-            Just Halt -> trace ("Program halted from instruction at address " <> show instructionPointer) memory
-            Just instruction -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction instruction memory)
-
-numberOfParams :: Instruction -> Int
-numberOfParams (Add _) = 3
-numberOfParams (Multiply _) = 3
-numberOfParams Halt = 0
+            Just (Halt, _) -> trace ("Program halted from instruction at address " <> show instructionPointer) memory
+            Just instructionAndParams@(instruction, _) -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction instructionAndParams memory)
 
 start :: InstructionPointer
 start = MkInstructionPointer 0
@@ -57,41 +51,54 @@ replace position newValue ((p', currentValue) : xs)
     | position == p' = (position, newValue) : xs
     | otherwise = (p', currentValue) : replace position newValue xs
 
-getInstruction :: InstructionPointer -> AddressableMemory -> Maybe Instruction
-getInstruction instructionPointer@(MkInstructionPointer address) memory =
-    let maybeOpcode = lookup address memory
-        parseOpcode :: Int -> Maybe Instruction
-        parseOpcode 1 = Add <$> getInstructionParams3 instructionPointer memory
-        parseOpcode 2 = Multiply <$> getInstructionParams3 instructionPointer memory
-        parseOpcode 99 = Just Halt
-        parseOpcode _ = Nothing
-     in parseOpcode =<< maybeOpcode
+getInstructionAndParams :: InstructionPointer -> AddressableMemory -> Maybe InstructionAndParameters
+getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory = do
+    opcode <- lookup address memory
+    instruction <- parseOpcode opcode
+    parameters <- getInstructionParams instruction instructionPointer memory
+    return (instruction, parameters)
 
-getInstructionParams3 :: InstructionPointer -> AddressableMemory -> Maybe InstructionParameterTriple
-getInstructionParams3 (MkInstructionPointer address) memory =
+parseOpcode :: Int -> Maybe Instruction
+parseOpcode 1 = Just Add
+parseOpcode 2 = Just Multiply
+parseOpcode 99 = Just Halt
+parseOpcode _ = Nothing
+
+getInstructionParams :: Instruction -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
+getInstructionParams instruction (MkInstructionPointer address) memory =
     let
-        maybeInput1Address = lookup (address + 1) memory
-        maybeInput2Address = lookup (address + 2) memory
-        maybeOutputAddress = lookup (address + 3) memory
+        getInstructionParams' :: Int -> Address -> AddressableMemory -> [Maybe InstructionParameter]
+        getInstructionParams' 0 _ _ = []
+        getInstructionParams' count currentAddress memory =
+            lookup currentAddress memory : getInstructionParams' (count - 1) (currentAddress + 1) memory
      in
-        (,,) <$> maybeInput1Address <*> maybeInput2Address <*> maybeOutputAddress
+        sequence $ getInstructionParams' (numberOfParams instruction) (address + 1) memory
 
 nextInstructionPointer :: Instruction -> InstructionPointer -> InstructionPointer
 nextInstructionPointer instruction (MkInstructionPointer address) =
     MkInstructionPointer (address + numberOfParams instruction + 1)
 
-applyInstruction :: Instruction -> AddressableMemory -> AddressableMemory
-applyInstruction (Add params) memory = applyInstructionParams3 (+) params memory
-applyInstruction (Multiply params) memory = applyInstructionParams3 (*) params memory
-applyInstruction Halt memory = memory
+applyInstruction :: InstructionAndParameters -> AddressableMemory -> AddressableMemory
+applyInstruction (Add, params) memory = applyInstructionParams3 (+) params memory
+applyInstruction (Multiply, params) memory = applyInstructionParams3 (*) params memory
+applyInstruction (Halt, _) memory = memory
 
-applyInstructionParams3 :: (a -> a -> a) -> InstructionParameterTriple -> AddressableList a -> AddressableList a
-applyInstructionParams3 f (inputAddress1, inputAddress2, outputAddress') list =
-    let maybeInputValues = (,) <$> lookup inputAddress1 list <*> lookup inputAddress2 list
+applyInstructionParams3 :: (a -> a -> a) -> [InstructionParameter] -> AddressableList a -> AddressableList a
+applyInstructionParams3 f parameters list =
+    let inputAddress1 = head parameters
+        inputAddress2 = parameters !! 1
+        outputAddress = parameters !! 2
+        maybeInputValues = (,) <$> lookup inputAddress1 list <*> lookup inputAddress2 list
         computedValue = uncurry f (fromJust maybeInputValues)
-     in replace outputAddress' computedValue list
+     in replace outputAddress computedValue list
 
 getAnswer :: AddressableList a -> Maybe a
 getAnswer = lookup 0
 
--- 509871 is too low
+runDay5 :: IO ()
+runDay5 = do
+    strings <- concatMap (splitOn ",") . lines <$> readFile "resources/day2.txt"
+    let ints :: [Int] = map read strings
+    let memory = createAddressableList ints
+    print (runProgram (12, 2) memory)
+    return ()
