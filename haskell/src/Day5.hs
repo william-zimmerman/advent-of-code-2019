@@ -2,21 +2,23 @@
 
 module Day5 (runDay5) where
 
-import Data.Char (digitToInt)
 import Data.List.Split (splitOn)
+import Lib (
+    Instruction (Add, Halt, Multiply, Read, Write),
+    ParameterMode (Immediate, Position),
+    instruction,
+    orderedParameterModes,
+    parseOpcodeValue,
+ )
 
 type Address = Int
 type AddressableList a = [(Address, a)]
 type AddressableMemory = AddressableList Int
 
-data ParameterMode = Position | Immediate deriving (Show)
-
 type InstructionParameter = Int
 type ParameterAndMode = (InstructionParameter, ParameterMode)
 
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
-
-data Instruction = Add | Multiply | Halt | Read | Write
 
 type InstructionAndParameters = (Instruction, [ParameterAndMode])
 
@@ -54,35 +56,11 @@ replace position newValue ((p', currentValue) : xs)
 
 getInstructionAndParams :: InstructionPointer -> AddressableMemory -> Maybe InstructionAndParameters
 getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory = do
-    opcode <- lookup address memory
-    (instruction, parameterModes) <- parseOpcode opcode
-    parameters <- getInstructionParams instruction instructionPointer memory
-    let parametersAndModes = zip parameters (parameterModes <> repeat Position)
-    return (instruction, parametersAndModes)
-
-parseOpcode :: Int -> Maybe (Instruction, [ParameterMode])
-parseOpcode value = do
-    let opcode = value `mod` 100
-    let modeInts = value `div` 100
-    instruction <- parseInstruction opcode
-    parameterModes <- parseModes modeInts
-    return (instruction, parameterModes)
-
-parseInstruction :: Int -> Maybe Instruction
-parseInstruction 1 = Just Add
-parseInstruction 2 = Just Multiply
-parseInstruction 99 = Just Halt
-parseInstruction _ = Nothing
-
-parseModes :: Int -> Maybe [ParameterMode]
-parseModes value =
-    let valueAsString = show value
-     in mapM (parseMode . digitToInt) (reverse valueAsString)
-
-parseMode :: Int -> Maybe ParameterMode
-parseMode 0 = Just Position
-parseMode 1 = Just Immediate
-parseMode _ = Nothing
+    opcodeValue <- lookup address memory
+    opcode <- parseOpcodeValue opcodeValue
+    parameters <- getInstructionParams (instruction opcode) instructionPointer memory
+    let parametersAndModes = zip parameters (orderedParameterModes opcode <> repeat Position)
+    return (instruction opcode, parametersAndModes)
 
 getInstructionParams :: Instruction -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
 getInstructionParams instruction (MkInstructionPointer address) memory =
