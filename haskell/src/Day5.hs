@@ -2,6 +2,7 @@
 
 module Day5 (runDay5) where
 
+import qualified AddressableList as AL (Address, AddressableList, create, replace)
 import Data.List (uncons)
 import Data.List.Split (splitOn)
 import qualified Opcode as O (
@@ -14,9 +15,7 @@ import qualified Opcode as O (
     parseOpcodeValue,
  )
 
-type Address = Int
-type AddressableList a = [(Address, a)]
-type AddressableMemory = AddressableList Int
+type AddressableMemory = AL.AddressableList Int
 
 data InstructionParameter = Immediate Int | Position Int
 
@@ -33,7 +32,7 @@ numberOfParams O.Write = 1
 
 runProgram :: (Int, Int) -> AddressableMemory -> Maybe AddressableMemory
 runProgram initialInputs memory =
-    let adjustedMemory = replace 2 (snd initialInputs) (replace 1 (fst initialInputs) memory)
+    let adjustedMemory = AL.replace 2 (snd initialInputs) (AL.replace 1 (fst initialInputs) memory)
      in recurseProgram start adjustedMemory
 
 recurseProgram :: InstructionPointer -> AddressableMemory -> Maybe AddressableMemory
@@ -47,15 +46,6 @@ recurseProgram instructionPointer memory = do
 start :: InstructionPointer
 start = MkInstructionPointer 0
 
-createAddressableList :: [a] -> AddressableList a
-createAddressableList = zip [0 ..]
-
-replace :: Address -> a -> AddressableList a -> AddressableList a
-replace _ _ [] = []
-replace position newValue ((p', currentValue) : xs)
-    | position == p' = (position, newValue) : xs
-    | otherwise = (p', currentValue) : replace position newValue xs
-
 getInstructionAndParams :: InstructionPointer -> AddressableMemory -> Maybe InstructionAndParameters
 getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory = do
     opcodeValue <- lookup address memory
@@ -66,7 +56,7 @@ getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory
 getInstructionParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
 getInstructionParams opcode (MkInstructionPointer address) memory =
     let
-        getInstructionParams' :: Int -> [O.ParameterMode] -> Address -> AddressableMemory -> [Maybe InstructionParameter]
+        getInstructionParams' :: Int -> [O.ParameterMode] -> AL.Address -> AddressableMemory -> [Maybe InstructionParameter]
         getInstructionParams' 0 _ _ _ = []
         getInstructionParams' count modes currentAddress memory' =
             let maybeHeadAndTail = uncons modes
@@ -98,18 +88,18 @@ resolveParameter :: AddressableMemory -> InstructionParameter -> Maybe Int
 resolveParameter _ (Day5.Immediate value) = Just value
 resolveParameter memory (Day5.Position address) = lookup address memory
 
-applyInstructionParams3 :: (Int -> Int -> Int) -> [Int] -> AddressableList Int -> AddressableList Int
+applyInstructionParams3 :: (Int -> Int -> Int) -> [Int] -> AL.AddressableList Int -> AL.AddressableList Int
 applyInstructionParams3 f inputs list =
     let input1 = head inputs
         input2 = inputs !! 1
         outputAddress = inputs !! 2
         computedValue = f input1 input2
-     in replace outputAddress computedValue list
+     in AL.replace outputAddress computedValue list
 
 runDay5 :: IO ()
 runDay5 = do
     strings <- concatMap (splitOn ",") . lines <$> readFile "resources/day2.txt"
     let ints :: [Int] = map read strings
-    let memory = createAddressableList ints
+    let memory = AL.create ints
     print (runProgram (12, 2) memory)
     return ()
