@@ -1,4 +1,12 @@
-module Lib (parseOpcodeValue, instruction, Instruction (..), Opcode, ParameterMode (..), orderedParameterModes, defaultMode) where
+module Opcode (
+    parseOpcodeValue,
+    instruction,
+    Instruction (..),
+    Opcode,
+    ParameterMode (..),
+    orderedParameterModes,
+    defaultMode,
+) where
 
 import Data.Char (digitToInt)
 

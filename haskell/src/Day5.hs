@@ -4,7 +4,7 @@ module Day5 (runDay5) where
 
 import Data.List (uncons)
 import Data.List.Split (splitOn)
-import Lib (
+import qualified Opcode as O (
     Instruction (Add, Halt, Multiply, Read, Write),
     Opcode,
     ParameterMode (Immediate, Position),
@@ -22,14 +22,14 @@ data InstructionParameter = Immediate Int | Position Int
 
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
 
-type InstructionAndParameters = (Instruction, [InstructionParameter])
+type InstructionAndParameters = (O.Instruction, [InstructionParameter])
 
-numberOfParams :: Instruction -> Int
-numberOfParams Add = 3
-numberOfParams Multiply = 3
-numberOfParams Halt = 0
-numberOfParams Read = 1
-numberOfParams Write = 1
+numberOfParams :: O.Instruction -> Int
+numberOfParams O.Add = 3
+numberOfParams O.Multiply = 3
+numberOfParams O.Halt = 0
+numberOfParams O.Read = 1
+numberOfParams O.Write = 1
 
 runProgram :: (Int, Int) -> AddressableMemory -> Maybe AddressableMemory
 runProgram initialInputs memory =
@@ -41,7 +41,7 @@ recurseProgram instructionPointer memory = do
     (instruction, parameterAndModes) <- getInstructionAndParams instructionPointer memory
     inputs <- resolveParameters parameterAndModes memory
     case instruction of
-        Halt -> Just memory
+        O.Halt -> Just memory
         other -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction other inputs memory)
 
 start :: InstructionPointer
@@ -59,37 +59,37 @@ replace position newValue ((p', currentValue) : xs)
 getInstructionAndParams :: InstructionPointer -> AddressableMemory -> Maybe InstructionAndParameters
 getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory = do
     opcodeValue <- lookup address memory
-    opcode <- parseOpcodeValue opcodeValue
+    opcode <- O.parseOpcodeValue opcodeValue
     parameters <- getInstructionParams opcode instructionPointer memory
-    return (instruction opcode, parameters)
+    return (O.instruction opcode, parameters)
 
-getInstructionParams :: Opcode -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
+getInstructionParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
 getInstructionParams opcode (MkInstructionPointer address) memory =
     let
-        getInstructionParams' :: Int -> [ParameterMode] -> Address -> AddressableMemory -> [Maybe InstructionParameter]
+        getInstructionParams' :: Int -> [O.ParameterMode] -> Address -> AddressableMemory -> [Maybe InstructionParameter]
         getInstructionParams' 0 _ _ _ = []
-        getInstructionParams' count modes currentAddress memory =
+        getInstructionParams' count modes currentAddress memory' =
             let maybeHeadAndTail = uncons modes
-                currentMode = maybe Lib.defaultMode fst maybeHeadAndTail
+                currentMode = maybe O.defaultMode fst maybeHeadAndTail
                 nextModes = maybe [] snd maybeHeadAndTail
-             in fmap (translate currentMode) (lookup currentAddress memory) : getInstructionParams' (count - 1) nextModes (currentAddress + 1) memory
+             in fmap (translate currentMode) (lookup currentAddress memory') : getInstructionParams' (count - 1) nextModes (currentAddress + 1) memory'
      in
-        sequence $ getInstructionParams' (numberOfParams $ instruction opcode) (orderedParameterModes opcode) (address + 1) memory
+        sequence $ getInstructionParams' (numberOfParams $ O.instruction opcode) (O.orderedParameterModes opcode) (address + 1) memory
 
-translate :: ParameterMode -> Int -> InstructionParameter
-translate Lib.Position = Day5.Position
-translate Lib.Immediate = Day5.Immediate
+translate :: O.ParameterMode -> Int -> InstructionParameter
+translate O.Position = Position
+translate O.Immediate = Immediate
 
-nextInstructionPointer :: Instruction -> InstructionPointer -> InstructionPointer
+nextInstructionPointer :: O.Instruction -> InstructionPointer -> InstructionPointer
 nextInstructionPointer instruction (MkInstructionPointer address) =
     MkInstructionPointer (address + numberOfParams instruction + 1)
 
-applyInstruction :: Instruction -> [Int] -> AddressableMemory -> AddressableMemory
-applyInstruction Add inputs memory = applyInstructionParams3 (+) inputs memory
-applyInstruction Multiply inputs memory = applyInstructionParams3 (*) inputs memory
-applyInstruction Halt _ memory = memory
-applyInstruction Read _ memory = undefined
-applyInstruction Write _ memory = undefined
+applyInstruction :: O.Instruction -> [Int] -> AddressableMemory -> AddressableMemory
+applyInstruction O.Add inputs memory = applyInstructionParams3 (+) inputs memory
+applyInstruction O.Multiply inputs memory = applyInstructionParams3 (*) inputs memory
+applyInstruction O.Halt _ memory = memory
+applyInstruction O.Read _ memory = undefined
+applyInstruction O.Write _ memory = undefined
 
 resolveParameters :: [InstructionParameter] -> AddressableMemory -> Maybe [Int]
 resolveParameters params memory = mapM (resolveParameter memory) params

@@ -28,7 +28,7 @@ library
       Day1
       Day2
       Day5
-      Lib
+      Opcode
   other-modules:
       Paths_haskell
   autogen-modules:
