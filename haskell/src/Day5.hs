@@ -42,7 +42,7 @@ recurseProgram instructionPointer memory = do
     inputs <- resolveParameters parameterAndModes memory
     case instruction of
         O.Halt -> Just memory
-        other -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction other inputs memory)
+        actionableInstruction -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction actionableInstruction inputs memory)
 
 start :: InstructionPointer
 start = MkInstructionPointer 0
@@ -105,9 +105,6 @@ applyInstructionParams3 f inputs list =
         outputAddress = inputs !! 2
         computedValue = f input1 input2
      in replace outputAddress computedValue list
-
-getAnswer :: AddressableList a -> Maybe a
-getAnswer = lookup 0
 
 runDay5 :: IO ()
 runDay5 = do
