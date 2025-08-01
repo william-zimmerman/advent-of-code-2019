@@ -2,10 +2,13 @@
 
 module Day5 (runDay5) where
 
+import Data.List (uncons)
 import Data.List.Split (splitOn)
 import Lib (
     Instruction (Add, Halt, Multiply, Read, Write),
+    Opcode,
     ParameterMode (Immediate, Position),
+    defaultMode,
     instruction,
     orderedParameterModes,
     parseOpcodeValue,
@@ -15,12 +18,11 @@ type Address = Int
 type AddressableList a = [(Address, a)]
 type AddressableMemory = AddressableList Int
 
-type InstructionParameter = Int
-type ParameterAndMode = (InstructionParameter, ParameterMode)
+data InstructionParameter = Immediate Int | Position Int
 
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
 
-type InstructionAndParameters = (Instruction, [ParameterAndMode])
+type InstructionAndParameters = (Instruction, [InstructionParameter])
 
 numberOfParams :: Instruction -> Int
 numberOfParams Add = 3
@@ -58,19 +60,25 @@ getInstructionAndParams :: InstructionPointer -> AddressableMemory -> Maybe Inst
 getInstructionAndParams instructionPointer@(MkInstructionPointer address) memory = do
     opcodeValue <- lookup address memory
     opcode <- parseOpcodeValue opcodeValue
-    parameters <- getInstructionParams (instruction opcode) instructionPointer memory
-    let parametersAndModes = zip parameters (orderedParameterModes opcode <> repeat Position)
-    return (instruction opcode, parametersAndModes)
+    parameters <- getInstructionParams opcode instructionPointer memory
+    return (instruction opcode, parameters)
 
-getInstructionParams :: Instruction -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
-getInstructionParams instruction (MkInstructionPointer address) memory =
+getInstructionParams :: Opcode -> InstructionPointer -> AddressableMemory -> Maybe [InstructionParameter]
+getInstructionParams opcode (MkInstructionPointer address) memory =
     let
-        getInstructionParams' :: Int -> Address -> AddressableMemory -> [Maybe InstructionParameter]
-        getInstructionParams' 0 _ _ = []
-        getInstructionParams' count currentAddress memory =
-            lookup currentAddress memory : getInstructionParams' (count - 1) (currentAddress + 1) memory
+        getInstructionParams' :: Int -> [ParameterMode] -> Address -> AddressableMemory -> [Maybe InstructionParameter]
+        getInstructionParams' 0 _ _ _ = []
+        getInstructionParams' count modes currentAddress memory =
+            let maybeHeadAndTail = uncons modes
+                currentMode = maybe Lib.defaultMode fst maybeHeadAndTail
+                nextModes = maybe [] snd maybeHeadAndTail
+             in fmap (translate currentMode) (lookup currentAddress memory) : getInstructionParams' (count - 1) nextModes (currentAddress + 1) memory
      in
-        sequence $ getInstructionParams' (numberOfParams instruction) (address + 1) memory
+        sequence $ getInstructionParams' (numberOfParams $ instruction opcode) (orderedParameterModes opcode) (address + 1) memory
+
+translate :: ParameterMode -> Int -> InstructionParameter
+translate Lib.Position = Day5.Position
+translate Lib.Immediate = Day5.Immediate
 
 nextInstructionPointer :: Instruction -> InstructionPointer -> InstructionPointer
 nextInstructionPointer instruction (MkInstructionPointer address) =
@@ -83,12 +91,12 @@ applyInstruction Halt _ memory = memory
 applyInstruction Read _ memory = undefined
 applyInstruction Write _ memory = undefined
 
-resolveParameters :: [ParameterAndMode] -> AddressableMemory -> Maybe [Int]
-resolveParameters paramsAndModes memory = mapM (resolveParameter memory) paramsAndModes
+resolveParameters :: [InstructionParameter] -> AddressableMemory -> Maybe [Int]
+resolveParameters params memory = mapM (resolveParameter memory) params
 
-resolveParameter :: AddressableMemory -> ParameterAndMode -> Maybe Int
-resolveParameter _ (value, Immediate) = Just value
-resolveParameter memory (address, Position) = lookup address memory
+resolveParameter :: AddressableMemory -> InstructionParameter -> Maybe Int
+resolveParameter _ (Day5.Immediate value) = Just value
+resolveParameter memory (Day5.Position address) = lookup address memory
 
 applyInstructionParams3 :: (Int -> Int -> Int) -> [Int] -> AddressableList Int -> AddressableList Int
 applyInstructionParams3 f inputs list =

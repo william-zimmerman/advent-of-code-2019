@@ -1,4 +1,4 @@
-module Lib (parseOpcodeValue, instruction, Instruction (..), Opcode, ParameterMode (..), orderedParameterModes) where
+module Lib (parseOpcodeValue, instruction, Instruction (..), Opcode, ParameterMode (..), orderedParameterModes, defaultMode) where
 
 import Data.Char (digitToInt)
 
@@ -6,6 +6,9 @@ data Opcode = MkOpcode Instruction [ParameterMode]
 
 data Instruction = Add | Multiply | Halt | Read | Write
 data ParameterMode = Position | Immediate deriving (Show)
+
+defaultMode :: ParameterMode
+defaultMode = Position
 
 parseOpcodeValue :: Int -> Maybe Opcode
 parseOpcodeValue value = do
