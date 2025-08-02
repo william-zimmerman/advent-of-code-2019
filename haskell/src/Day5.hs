@@ -5,6 +5,7 @@ module Day5 (runDay5) where
 import qualified AddressableList as AL (Address, AddressableList, create, replace)
 import Data.List (uncons)
 import Data.List.Split (splitOn)
+import Debug.Trace (trace)
 import qualified Opcode as O (
     Instruction (Add, Halt, Multiply, Read, Write),
     Opcode,
@@ -16,12 +17,23 @@ import qualified Opcode as O (
  )
 
 type AddressableMemory = AL.AddressableList Int
-
-data InstructionParameter = Immediate Int | Position Int
-
+data InstructionParameter = Immediate Int | Position Int deriving (Show)
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
-
 type InstructionAndParameters = (O.Instruction, [InstructionParameter])
+
+newtype StdIn = MkStdIn [Int] deriving (Show)
+newtype StdOut = MkStdOut [Int] deriving (Show)
+data ApplicationState = MkState AddressableMemory StdIn StdOut deriving (Show)
+
+read :: StdIn -> (Maybe Int, StdIn)
+read (MkStdIn []) = (Nothing, MkStdIn [])
+read (MkStdIn (x : xs)) = (Just x, MkStdIn xs)
+
+write :: Int -> StdOut -> StdOut
+write x (MkStdOut xs) = MkStdOut (xs <> [x])
+
+updateMemory :: AddressableMemory -> ApplicationState -> ApplicationState
+updateMemory newMemory (MkState _ stdIn stdOut) = MkState newMemory stdIn stdOut
 
 numberOfParams :: O.Instruction -> Int
 numberOfParams O.Add = 3
@@ -30,18 +42,18 @@ numberOfParams O.Halt = 0
 numberOfParams O.Read = 1
 numberOfParams O.Write = 1
 
-runProgram :: (Int, Int) -> AddressableMemory -> Maybe AddressableMemory
-runProgram initialInputs memory =
+runProgram :: (Int, Int) -> ApplicationState -> Maybe ApplicationState
+runProgram initialInputs (MkState memory stdIn stdOut) =
     let adjustedMemory = AL.replace 2 (snd initialInputs) (AL.replace 1 (fst initialInputs) memory)
-     in recurseProgram start adjustedMemory
+     in recurseProgram start (MkState memory stdIn stdOut)
 
-recurseProgram :: InstructionPointer -> AddressableMemory -> Maybe AddressableMemory
-recurseProgram instructionPointer memory = do
-    (instruction, parameterAndModes) <- getInstructionAndParams instructionPointer memory
-    inputs <- resolveParameters parameterAndModes memory
+recurseProgram :: InstructionPointer -> ApplicationState -> Maybe ApplicationState
+recurseProgram instructionPointer state@(MkState memory _ _) = do
+    (instruction, parameterAndModes) <- trace (show memory) (getInstructionAndParams instructionPointer memory)
+    inputs <- trace (show (instruction, parameterAndModes)) (resolveParameters parameterAndModes memory)
     case instruction of
-        O.Halt -> Just memory
-        actionableInstruction -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction actionableInstruction inputs memory)
+        O.Halt -> Just state
+        actionableInstruction -> recurseProgram (nextInstructionPointer instruction instructionPointer) (applyInstruction actionableInstruction inputs state)
 
 start :: InstructionPointer
 start = MkInstructionPointer 0
@@ -74,15 +86,26 @@ nextInstructionPointer :: O.Instruction -> InstructionPointer -> InstructionPoin
 nextInstructionPointer instruction (MkInstructionPointer address) =
     MkInstructionPointer (address + numberOfParams instruction + 1)
 
-applyInstruction :: O.Instruction -> [Int] -> AddressableMemory -> AddressableMemory
-applyInstruction O.Add inputs memory = applyInstructionParams3 (+) inputs memory
-applyInstruction O.Multiply inputs memory = applyInstructionParams3 (*) inputs memory
-applyInstruction O.Halt _ memory = memory
-applyInstruction O.Read _ memory = undefined
-applyInstruction O.Write _ memory = undefined
+applyInstruction :: O.Instruction -> [Int] -> ApplicationState -> ApplicationState
+applyInstruction O.Add inputs (MkState memory stdIn stdOut) = MkState (applyInstructionParams3 (+) inputs memory) stdIn stdOut
+applyInstruction O.Multiply inputs (MkState memory stdIn stdOut) = MkState (applyInstructionParams3 (*) inputs memory) stdIn stdOut
+applyInstruction O.Halt _ state = state
+applyInstruction O.Read inputs state = readFromStdIn (head inputs) state
+applyInstruction O.Write inputs state = writeToStdOut (head inputs) state
 
 resolveParameters :: [InstructionParameter] -> AddressableMemory -> Maybe [Int]
 resolveParameters params memory = mapM (resolveParameter memory) params
+
+readFromStdIn :: AL.Address -> ApplicationState -> ApplicationState
+readFromStdIn outputAddress (MkState memory stdIn stdOut) =
+    let
+        (maybeReadValue, resultingStdIn) = Day5.read stdIn
+        updatedMemory = maybe memory (\readValue -> AL.replace outputAddress readValue memory) maybeReadValue
+     in
+        MkState updatedMemory resultingStdIn stdOut
+
+writeToStdOut :: Int -> ApplicationState -> ApplicationState
+writeToStdOut value (MkState memory stdIn stdOut) = MkState memory stdIn (write value stdOut)
 
 resolveParameter :: AddressableMemory -> InstructionParameter -> Maybe Int
 resolveParameter _ (Day5.Immediate value) = Just value
@@ -94,12 +117,17 @@ applyInstructionParams3 f inputs list =
         input2 = inputs !! 1
         outputAddress = inputs !! 2
         computedValue = f input1 input2
-     in AL.replace outputAddress computedValue list
+        newMemory = AL.replace outputAddress computedValue list
+     in trace (show (inputs, newMemory)) newMemory
 
 runDay5 :: IO ()
 runDay5 = do
-    strings <- concatMap (splitOn ",") . lines <$> readFile "resources/day2.txt"
-    let ints :: [Int] = map read strings
+    strings <- concatMap (splitOn ",") . lines <$> readFile "resources/day5.txt"
+    let ints :: [Int] = map Prelude.read strings
     let memory = AL.create ints
-    print (runProgram (12, 2) memory)
+    let testMemory = AL.create [1002, 4, 3, 4, 33]
+    let stdIn = MkStdIn []
+    let stdOut = MkStdOut []
+    let endState = runProgram (12, 2) (MkState testMemory stdIn stdOut)
+    print endState
     return ()

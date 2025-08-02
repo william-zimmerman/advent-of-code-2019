@@ -10,9 +10,9 @@ module Opcode (
 
 import Data.Char (digitToInt)
 
-data Opcode = MkOpcode Instruction [ParameterMode]
+data Opcode = MkOpcode Instruction [ParameterMode] deriving (Show)
 
-data Instruction = Add | Multiply | Halt | Read | Write
+data Instruction = Add | Multiply | Halt | Read | Write deriving (Show)
 data ParameterMode = Position | Immediate deriving (Show)
 
 defaultMode :: ParameterMode
@@ -36,6 +36,8 @@ parseInstructionCode :: Int -> Maybe Instruction
 parseInstructionCode 1 = Just Add
 parseInstructionCode 2 = Just Multiply
 parseInstructionCode 99 = Just Halt
+parseInstructionCode 3 = Just Read
+parseInstructionCode 4 = Just Write
 parseInstructionCode _ = Nothing
 
 parseModeCodes :: Int -> Maybe [ParameterMode]
