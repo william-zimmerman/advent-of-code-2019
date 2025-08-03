@@ -2,7 +2,7 @@
 
 module Day5 (runDay5) where
 
-import qualified AddressableList as AL (Address, AddressableList, create, replace)
+import qualified AddressableList as AL (Address, AddressableList, create, eitherLookup, replace)
 import Data.List (uncons)
 import Data.List.Split (splitOn)
 import qualified Opcode as O (
@@ -14,7 +14,9 @@ import qualified Opcode as O (
     orderedParameterModes,
     parseOpcodeValue,
  )
+import Text.Printf (printf)
 
+type ErrorMessage = String
 type AddressableMemory = AL.AddressableList Int
 data Param = Immediate Int | Position Int deriving (Show)
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
@@ -45,53 +47,49 @@ numberOfParams O.Halt = 0
 numberOfParams O.Read = 1
 numberOfParams O.Write = 1
 
-runProgram :: ApplicationState -> Maybe ApplicationState
+runProgram :: ApplicationState -> Either ErrorMessage ApplicationState
 runProgram (MkState memory stdIn stdOut) = recurseProgram start (MkState memory stdIn stdOut)
 
-recurseProgram :: InstructionPointer -> ApplicationState -> Maybe ApplicationState
+recurseProgram :: InstructionPointer -> ApplicationState -> Either ErrorMessage ApplicationState
 recurseProgram instructionPointer@(MkInstructionPointer instructionAddress) state@(MkState memory _ _) = do
-    opcode <- O.parseOpcodeValue =<< lookup instructionAddress memory
+    opcode <- O.parseOpcodeValue =<< AL.eitherLookup instructionAddress memory
     instructionAndParams <- getInstructionAndParams opcode instructionPointer memory
     case instructionAndParams of
-        Halt -> Just state
+        Halt -> Right state
         actionableInstruction -> recurseProgram (nextInstructionPointer (O.instruction opcode) instructionPointer) (applyInstruction actionableInstruction state)
 
 start :: InstructionPointer
 start = MkInstructionPointer 0
 
-getInstructionAndParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Maybe InstructionAndParams
+getInstructionAndParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Either ErrorMessage InstructionAndParams
 getInstructionAndParams opcode instructionPointer memory = do
     parameters <- getInstructionParams opcode instructionPointer memory
     constructInstruction memory (O.instruction opcode) parameters
 
-constructInstruction :: AddressableMemory -> O.Instruction -> [Param] -> Maybe InstructionAndParams
+constructInstruction :: AddressableMemory -> O.Instruction -> [Param] -> Either ErrorMessage InstructionAndParams
 constructInstruction memory O.Add [p1, p2, Position address] = do
     addend1 <- resolveParameter memory p1
     addend2 <- resolveParameter memory p2
     return (Add (addend1, addend2) address)
-constructInstruction _ O.Add _ = Nothing
 constructInstruction memory O.Multiply [p1, p2, Position address] = do
     multiplicand <- resolveParameter memory p1
     multiplier <- resolveParameter memory p2
     return (Multiply (multiplicand, multiplier) address)
-constructInstruction _ O.Multiply _ = Nothing
-constructInstruction _ O.Halt [] = Just Halt
-constructInstruction _ O.Halt _ = Nothing
-constructInstruction _ O.Read [Position address] = Just (Read address)
-constructInstruction _ O.Read _ = Nothing
+constructInstruction _ O.Halt [] = Right Halt
+constructInstruction _ O.Read [Position address] = Right (Read address)
 constructInstruction memory O.Write [p1] = Write <$> resolveParameter memory p1
-constructInstruction _ O.Write _ = Nothing
+constructInstruction _ instruction params = Left (printf "Unable to parse parameters %s for instruction %s")
 
-getInstructionParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Maybe [Param]
+getInstructionParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Either ErrorMessage [Param]
 getInstructionParams opcode (MkInstructionPointer address) memory =
     let
-        getInstructionParams' :: Int -> [O.ParameterMode] -> AL.Address -> AddressableMemory -> [Maybe Param]
+        getInstructionParams' :: Int -> [O.ParameterMode] -> AL.Address -> AddressableMemory -> [Either ErrorMessage Param]
         getInstructionParams' 0 _ _ _ = []
         getInstructionParams' count modes currentAddress memory' =
             let maybeHeadAndTail = uncons modes
                 currentMode = maybe O.defaultMode fst maybeHeadAndTail
                 nextModes = maybe [] snd maybeHeadAndTail
-             in fmap (translate currentMode) (lookup currentAddress memory') : getInstructionParams' (count - 1) nextModes (currentAddress + 1) memory'
+             in fmap (translate currentMode) (AL.eitherLookup currentAddress memory') : getInstructionParams' (count - 1) nextModes (currentAddress + 1) memory'
      in
         sequence $ getInstructionParams' (numberOfParams $ O.instruction opcode) (O.orderedParameterModes opcode) (address + 1) memory
 
@@ -118,9 +116,9 @@ readFromStdIn outputAddress (MkState memory stdIn stdOut) =
      in
         MkState updatedMemory resultingStdIn stdOut
 
-resolveParameter :: AddressableMemory -> Param -> Maybe Int
-resolveParameter _ (Day5.Immediate value) = Just value
-resolveParameter memory (Day5.Position address) = lookup address memory
+resolveParameter :: AddressableMemory -> Param -> Either ErrorMessage Int
+resolveParameter _ (Day5.Immediate value) = Right value
+resolveParameter memory (Day5.Position address) = AL.eitherLookup address memory
 
 runDay5 :: IO ()
 runDay5 = do
