@@ -37,6 +37,7 @@ library:
   source-dirs: src
   dependencies:
     - split
+    - mtl
 
 executables:
   haskell-exe:
