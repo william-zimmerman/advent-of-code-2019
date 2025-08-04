@@ -13,7 +13,7 @@ import Text.Printf (printf)
 
 data Opcode = MkOpcode Instruction [ParameterMode] deriving (Show)
 
-data Instruction = Add | Multiply | Halt | Read | Write deriving (Show)
+data Instruction = Add | Multiply | Halt | Read | Write | JumpIfTrue | JumpIfFalse | LessThan | Equals deriving (Show)
 data ParameterMode = Position | Immediate deriving (Show)
 
 defaultMode :: ParameterMode
@@ -39,6 +39,10 @@ parseInstructionCode 2 = Right Multiply
 parseInstructionCode 99 = Right Halt
 parseInstructionCode 3 = Right Read
 parseInstructionCode 4 = Right Write
+parseInstructionCode 5 = Right JumpIfTrue
+parseInstructionCode 6 = Right JumpIfFalse
+parseInstructionCode 7 = Right LessThan
+parseInstructionCode 8 = Right Equals
 parseInstructionCode value = Left (printf "Unable to parse instruction code %i" value)
 
 parseModeCodes :: Int -> Either String [ParameterMode]

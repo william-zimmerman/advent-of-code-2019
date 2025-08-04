@@ -7,8 +7,9 @@ import Control.Monad.Error.Class (liftEither)
 import Control.Monad.State (MonadState (get), StateT, put, runStateT)
 import Data.List (uncons)
 import Data.List.Split (splitOn)
+import Debug.Trace
 import qualified Opcode as O (
-    Instruction (Add, Halt, Multiply, Read, Write),
+    Instruction (Add, Equals, Halt, JumpIfFalse, JumpIfTrue, LessThan, Multiply, Read, Write),
     Opcode,
     ParameterMode (Immediate, Position),
     defaultMode,
@@ -29,6 +30,10 @@ data InstructionAndParams
     | Halt
     | Read AL.Address
     | Write Int
+    | JumpIfTrue (Int, Int)
+    | JumpIfFalse (Int, Int)
+    | LessThan (Int, Int) AL.Address
+    | Equals (Int, Int) AL.Address
     deriving (Show)
 
 newtype StdIn = MkStdIn [Int] deriving (Show)
@@ -50,11 +55,15 @@ numberOfParams O.Multiply = 3
 numberOfParams O.Halt = 0
 numberOfParams O.Read = 1
 numberOfParams O.Write = 1
+numberOfParams O.JumpIfTrue = 2
+numberOfParams O.JumpIfFalse = 2
+numberOfParams O.LessThan = 3
+numberOfParams O.Equals = 3
 
 runProgram :: AppM
 runProgram = do
     (MkState instructionPointer memory _ stdOut) <- get
-    opcode <- liftEither (getOpcode instructionPointer memory)
+    opcode <- trace (show instructionPointer) liftEither (getOpcode instructionPointer memory)
     instructionAndParams <- liftEither (getInstructionAndParams opcode instructionPointer memory)
     case instructionAndParams of
         Halt -> return stdOut
@@ -83,6 +92,22 @@ constructInstruction memory O.Multiply [p1, p2, Position address] = do
 constructInstruction _ O.Halt [] = Right Halt
 constructInstruction _ O.Read [Position address] = Right (Read address)
 constructInstruction memory O.Write [p1] = Write <$> resolveParameter memory p1
+constructInstruction memory O.JumpIfTrue [p1, p2] = do
+    value1 <- resolveParameter memory p1
+    value2 <- resolveParameter memory p2
+    return (JumpIfTrue (value1, value2))
+constructInstruction memory O.JumpIfFalse [p1, p2] = do
+    value1 <- resolveParameter memory p1
+    value2 <- resolveParameter memory p2
+    return (JumpIfFalse (value1, value2))
+constructInstruction memory O.LessThan [p1, p2, Position address] = do
+    value1 <- resolveParameter memory p1
+    value2 <- resolveParameter memory p2
+    return (LessThan (value1, value2) address)
+constructInstruction memory O.Equals [p1, p2, Position address] = do
+    value1 <- resolveParameter memory p1
+    value2 <- resolveParameter memory p2
+    return (Equals (value1, value2) address)
 constructInstruction _ instruction params = Left (printf "Unable to parse parameters %s for instruction %s" (show params) (show instruction))
 
 getInstructionParams :: O.Opcode -> InstructionPointer -> AddressableMemory -> Either ErrorMessage [Param]
@@ -118,19 +143,36 @@ applyInstruction (Multiply (multiplicand, multipler) outputAddress) = do
 applyInstruction Halt = do
     (MkState _ _ _ stdOut) <- get
     return stdOut
-applyInstruction (Read address) = readFromStdIn address
+applyInstruction (Read address) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    let (maybeReadValue, resultingStdIn) = Day5.read stdIn
+    let updatedMemory = maybe memory (\readValue -> AL.replace address readValue memory) maybeReadValue
+    put (MkState (nextInstructionPointer O.Read instructionPointer) updatedMemory resultingStdIn stdOut)
+    return stdOut
 applyInstruction (Write value) = do
     (MkState instructionPointer memory stdIn stdOut) <- get
     let newStdOut = write value stdOut
     put (MkState (nextInstructionPointer O.Write instructionPointer) memory stdIn newStdOut)
     return newStdOut
-
-readFromStdIn :: AL.Address -> AppM
-readFromStdIn outputAddress = do
+applyInstruction (JumpIfTrue (v1, v2)) = do
     (MkState instructionPointer memory stdIn stdOut) <- get
-    let (maybeReadValue, resultingStdIn) = Day5.read stdIn
-    let updatedMemory = maybe memory (\readValue -> AL.replace outputAddress readValue memory) maybeReadValue
-    put (MkState (nextInstructionPointer O.Read instructionPointer) updatedMemory resultingStdIn stdOut)
+    let newInstructionPointer = if v1 /= 0 then MkInstructionPointer v2 else nextInstructionPointer O.JumpIfTrue instructionPointer
+    put (MkState newInstructionPointer memory stdIn stdOut)
+    return stdOut
+applyInstruction (JumpIfFalse (v1, v2)) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    let newInstructionPointer = if v1 == 0 then MkInstructionPointer v2 else nextInstructionPointer O.JumpIfFalse instructionPointer
+    put (MkState newInstructionPointer memory stdIn stdOut)
+    return stdOut
+applyInstruction (LessThan (v1, v2) address) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    let valueToWrite = if v1 < v2 then 1 else 0
+    put (MkState (nextInstructionPointer O.LessThan instructionPointer) (AL.replace address valueToWrite memory) stdIn stdOut)
+    return stdOut
+applyInstruction (Equals (v1, v2) address) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    let valueToWrite = if v1 == v2 then 1 else 0
+    put (MkState (nextInstructionPointer O.Equals instructionPointer) (AL.replace address valueToWrite memory) stdIn stdOut)
     return stdOut
 
 resolveParameter :: AddressableMemory -> Param -> Either ErrorMessage Int
@@ -142,7 +184,7 @@ runDay5 = do
     strings <- concatMap (splitOn ",") . lines <$> readFile "resources/day5.txt"
     let ints :: [Int] = map Prelude.read strings
     let memory = AL.create ints
-    let stdIn = MkStdIn [1]
+    let stdIn = MkStdIn [5]
     let stdOut = MkStdOut []
     let initialState = MkState start memory stdIn stdOut
     let result = runStateT runProgram initialState
