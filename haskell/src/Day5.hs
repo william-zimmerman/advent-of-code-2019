@@ -3,8 +3,8 @@
 module Day5 (runDay5) where
 
 import qualified AddressableList as AL (Address, AddressableList, create, eitherLookup, replace)
-import Control.Monad.Identity
-import Control.Monad.State (MonadState (get), State, put, runStateT)
+import Control.Monad.Error.Class (liftEither)
+import Control.Monad.State (MonadState (get), StateT, put, runStateT)
 import Data.List (uncons)
 import Data.List.Split (splitOn)
 import qualified Opcode as O (
@@ -35,7 +35,7 @@ newtype StdIn = MkStdIn [Int] deriving (Show)
 newtype StdOut = MkStdOut [Int] deriving (Show)
 data ApplicationState = MkState AddressableMemory StdIn StdOut deriving (Show)
 
-type AppM = State ApplicationState (Either ErrorMessage StdOut)
+type AppM = StateT ApplicationState (Either ErrorMessage) StdOut
 
 read :: StdIn -> (Maybe Int, StdIn)
 read (MkStdIn []) = (Nothing, MkStdIn [])
@@ -51,32 +51,17 @@ numberOfParams O.Halt = 0
 numberOfParams O.Read = 1
 numberOfParams O.Write = 1
 
-numberOfParams'' :: InstructionAndParams -> Int
-numberOfParams'' (Add _ _) = 3
-numberOfParams'' (Multiply _ _) = 3
-numberOfParams'' Halt = 0
-numberOfParams'' (Read _) = 1
-numberOfParams'' (Write _) = 1
-
 runProgram :: AppM
 runProgram = do recurseProgram start
 
 recurseProgram :: InstructionPointer -> AppM
 recurseProgram instructionPointer@(MkInstructionPointer instructionAddress) = do
     (MkState memory _ stdOut) <- get
-    let eitherErrorMessageOrInstructionAndParams =
-            AL.eitherLookup instructionAddress memory
-                >>= O.parseOpcodeValue
-                >>= (\opcode' -> getInstructionAndParams opcode' instructionPointer memory)
-    either
-        (return . Left)
-        ( \instructionAndParams -> case instructionAndParams of
-            Halt -> return (Right stdOut)
-            actionableInstruction ->
-                applyInstruction' actionableInstruction
-                    >> recurseProgram (nextInstructionPointer actionableInstruction instructionPointer)
-        )
-        eitherErrorMessageOrInstructionAndParams
+    opcode <- liftEither (AL.eitherLookup instructionAddress memory >>= O.parseOpcodeValue)
+    instructionAndParams <- liftEither (getInstructionAndParams opcode instructionPointer memory)
+    case instructionAndParams of
+        Halt -> return stdOut
+        actionableInstruction -> applyInstruction' actionableInstruction >> recurseProgram (nextInstructionPointer (O.instruction opcode) instructionPointer)
 
 start :: InstructionPointer
 start = MkInstructionPointer 0
@@ -117,28 +102,28 @@ translate :: O.ParameterMode -> Int -> Param
 translate O.Position = Position
 translate O.Immediate = Immediate
 
-nextInstructionPointer :: InstructionAndParams -> InstructionPointer -> InstructionPointer
+nextInstructionPointer :: O.Instruction -> InstructionPointer -> InstructionPointer
 nextInstructionPointer instruction (MkInstructionPointer address) =
-    MkInstructionPointer (address + numberOfParams'' instruction + 1)
+    MkInstructionPointer (address + numberOfParams instruction + 1)
 
 applyInstruction' :: InstructionAndParams -> AppM
 applyInstruction' (Add (addend1, addend2) outputAddress) = do
     (MkState memory stdIn stdOut) <- get
     put (MkState (AL.replace outputAddress (addend1 + addend2) memory) stdIn stdOut)
-    return (Right stdOut)
+    return stdOut
 applyInstruction' (Multiply (multiplicand, multipler) outputAddress) = do
     (MkState memory stdIn stdOut) <- get
     put (MkState (AL.replace outputAddress (multiplicand * multipler) memory) stdIn stdOut)
-    return (Right stdOut)
+    return stdOut
 applyInstruction' Halt = do
     (MkState _ _ stdOut) <- get
-    return (Right stdOut)
+    return stdOut
 applyInstruction' (Read address) = readFromStdIn address
 applyInstruction' (Write value) = do
     (MkState memory stdIn stdOut) <- get
     let newStdOut = write value stdOut
     put (MkState memory stdIn newStdOut)
-    return (Right newStdOut)
+    return newStdOut
 
 readFromStdIn :: AL.Address -> AppM
 readFromStdIn outputAddress = do
@@ -146,7 +131,7 @@ readFromStdIn outputAddress = do
     let (maybeReadValue, resultingStdIn) = Day5.read stdIn
     let updatedMemory = maybe memory (\readValue -> AL.replace outputAddress readValue memory) maybeReadValue
     put (MkState updatedMemory resultingStdIn stdOut)
-    return (Right stdOut)
+    return stdOut
 
 resolveParameter :: AddressableMemory -> Param -> Either ErrorMessage Int
 resolveParameter _ (Day5.Immediate value) = Right value
@@ -160,6 +145,6 @@ runDay5 = do
     let stdIn = MkStdIn [1]
     let stdOut = MkStdOut []
     let initialState = MkState memory stdIn stdOut
-    let Identity (result, _) = runStateT runProgram initialState
+    let result = runStateT runProgram initialState
     print result
     return ()
