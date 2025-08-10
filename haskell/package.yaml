@@ -38,6 +38,7 @@ library:
   dependencies:
     - split
     - mtl
+    - containers
 
 executables:
   haskell-exe:
