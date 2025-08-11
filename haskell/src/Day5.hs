@@ -51,6 +51,8 @@ data Instruction where
     LessThan :: AnyParam -> AnyParam -> Param Position -> Instruction
     Equals :: AnyParam -> AnyParam -> Param Position -> Instruction
 
+deriving instance Show Instruction
+
 data InstructionSpec = InstructionSpec
     { instructionName :: String
     , parameterCount :: Int
@@ -61,13 +63,56 @@ instructionTable :: M.Map Int InstructionSpec
 instructionTable =
     M.fromList
         [ (1, InstructionSpec "Add" 3 buildAdd)
+        , (2, InstructionSpec "Multiply" 3 buildMultiply)
+        , (3, InstructionSpec "Read" 1 buildRead)
+        , (4, InstructionSpec "Write" 1 buildWrite)
+        , (5, InstructionSpec "Jump-If-True" 2 buildJumpIfTrue)
+        , (6, InstructionSpec "Jump-If-False" 2 buildJumpIfFalse)
+        , (7, InstructionSpec "LessThan" 3 buildLessThan)
+        , (8, InstructionSpec "Equals" 3 buildEquals)
+        , (99, InstructionSpec "Halt" 0 buildHalt)
         ]
 
 type InstructionAndSpec = (Instruction, InstructionSpec)
 
 buildAdd :: [AnyParam] -> Either ErrorMessage Instruction
 buildAdd [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Add param1 param2 outputAddress)
-buildAdd xs = Left (printf "Unable to create Add instructions from parameters %s" (show xs))
+buildAdd xs = Left (buildError "Add" xs)
+
+buildMultiply :: [AnyParam] -> Either ErrorMessage Instruction
+buildMultiply [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Multiply param1 param2 outputAddress)
+buildMultiply xs = Left (buildError "Multiply" xs)
+
+buildRead :: [AnyParam] -> Either ErrorMessage Instruction
+buildRead [AnyParam outputAddress@(Pos _)] = Right (Read outputAddress)
+buildRead xs = Left (buildError "Read" xs)
+
+buildWrite :: [AnyParam] -> Either ErrorMessage Instruction
+buildWrite [param] = Right (Write param)
+buildWrite xs = Left (buildError "Write" xs)
+
+buildHalt :: [AnyParam] -> Either ErrorMessage Instruction
+buildHalt [] = Right Halt
+buildHalt xs = Left (buildError "Halt" xs)
+
+buildJumpIfTrue :: [AnyParam] -> Either ErrorMessage Instruction
+buildJumpIfTrue [param1, param2] = Right (JumpIfTrue param1 param2)
+buildJumpIfTrue xs = Left (buildError "Jump-If-True" xs)
+
+buildJumpIfFalse :: [AnyParam] -> Either ErrorMessage Instruction
+buildJumpIfFalse [param1, param2] = Right (JumpIfFalse param1 param2)
+buildJumpIfFalse xs = Left (buildError "Jump-If-False" xs)
+
+buildLessThan :: [AnyParam] -> Either ErrorMessage Instruction
+buildLessThan [param1, param2, AnyParam outputAddress@(Pos _)] = Right (LessThan param1 param2 outputAddress)
+buildLessThan xs = Left (buildError "LessThan" xs)
+
+buildEquals :: [AnyParam] -> Either ErrorMessage Instruction
+buildEquals [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Equals param1 param2 outputAddress)
+buildEquals xs = Left (buildError "Equals" xs)
+
+buildError :: String -> [AnyParam] -> String
+buildError instructionName' params = printf "Unable to create %s instruction from parameters %s" instructionName' (show params)
 
 newtype StdIn = MkStdIn [Int] deriving (Show)
 newtype StdOut = MkStdOut [Int] deriving (Show)
@@ -111,6 +156,10 @@ getInstructionAndSpec opcode instructionPointer memory = do
 getInstructionParams :: InstructionSpec -> [O.ParameterMode] -> InstructionPointer -> AddressableMemory -> Either ErrorMessage [AnyParam]
 getInstructionParams instructionSpec parameterModes (MkInstructionPointer address) memory =
     let
+        translate :: O.ParameterMode -> Int -> AnyParam
+        translate O.Immediate = AnyParam . Imm
+        translate O.Position = AnyParam . Pos
+
         getInstructionParams' :: Int -> [O.ParameterMode] -> AL.Address -> AddressableMemory -> [Either ErrorMessage AnyParam]
         getInstructionParams' 0 _ _ _ = []
         getInstructionParams' count modes currentAddress memory' =
@@ -120,10 +169,6 @@ getInstructionParams instructionSpec parameterModes (MkInstructionPointer addres
              in fmap (translate currentMode) (AL.eitherLookup currentAddress memory') : getInstructionParams' (count - 1) nextModes (currentAddress + 1) memory'
      in
         sequence $ getInstructionParams' (parameterCount instructionSpec) parameterModes (address + 1) memory
-
-translate :: O.ParameterMode -> Int -> AnyParam
-translate O.Immediate = AnyParam . Imm
-translate O.Position = AnyParam . Pos
 
 nextInstructionPointer :: InstructionSpec -> InstructionPointer -> InstructionPointer
 nextInstructionPointer instructionSpec (MkInstructionPointer address) =
@@ -136,7 +181,60 @@ applyInstruction (Add (AnyParam param1) (AnyParam param2) (Pos outputAddress), i
     addend2 <- liftEither $ resolveParameter memory param2
     put (MkState (nextInstructionPointer instructionSpec instructionPointer) (AL.replace outputAddress (addend1 + addend2) memory) stdIn stdOut)
     return stdOut
-applyInstruction _ = liftEither (Left "Error!")
+applyInstruction (Multiply (AnyParam param1) (AnyParam param2) (Pos outputAddress), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    multiplicand1 <- liftEither $ resolveParameter memory param1
+    multiplicand2 <- liftEither $ resolveParameter memory param2
+    put (MkState (nextInstructionPointer instructionSpec instructionPointer) (AL.replace outputAddress (multiplicand1 * multiplicand2) memory) stdIn stdOut)
+    return stdOut
+applyInstruction (Halt, _) = do
+    liftEither (Left "Attempting to apply Halt instruction")
+applyInstruction (Read (Pos outputAddress), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    let (maybeReadValue, resultingStdIn) = Day5.read stdIn
+    let updatedMemory = maybe memory (\readValue -> AL.replace outputAddress readValue memory) maybeReadValue
+    put (MkState (nextInstructionPointer instructionSpec instructionPointer) updatedMemory resultingStdIn stdOut)
+    return stdOut
+applyInstruction (Write (AnyParam parameter), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    valueToWrite <- liftEither (resolveParameter memory parameter)
+    let resultingStdOut = write valueToWrite stdOut
+    put (MkState (nextInstructionPointer instructionSpec instructionPointer) memory stdIn resultingStdOut)
+    return resultingStdOut
+applyInstruction (JumpIfTrue (AnyParam param1) (AnyParam param2), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    valueToTest <- liftEither (resolveParameter memory param1)
+    conditionalNextInstructionPointer <- liftEither (resolveParameter memory param2)
+    let nextInstructionPointer' =
+            if valueToTest /= 0
+                then MkInstructionPointer conditionalNextInstructionPointer
+                else nextInstructionPointer instructionSpec instructionPointer
+    put (MkState nextInstructionPointer' memory stdIn stdOut)
+    return stdOut
+applyInstruction (JumpIfFalse (AnyParam param1) (AnyParam param2), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    valueToTest <- liftEither (resolveParameter memory param1)
+    conditionalNextInstructionPointer <- liftEither (resolveParameter memory param2)
+    let nextInstructionPointer' =
+            if valueToTest == 0
+                then MkInstructionPointer conditionalNextInstructionPointer
+                else nextInstructionPointer instructionSpec instructionPointer
+    put (MkState nextInstructionPointer' memory stdIn stdOut)
+    return stdOut
+applyInstruction (LessThan (AnyParam param1) (AnyParam param2) (Pos outputAddress), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    value1 <- liftEither (resolveParameter memory param1)
+    value2 <- liftEither (resolveParameter memory param2)
+    let valueToWrite = if value1 < value2 then 1 :: Int else 0
+    put (MkState (nextInstructionPointer instructionSpec instructionPointer) (AL.replace outputAddress valueToWrite memory) stdIn stdOut)
+    return stdOut
+applyInstruction (Equals (AnyParam param1) (AnyParam param2) (Pos outputAddress), instructionSpec) = do
+    (MkState instructionPointer memory stdIn stdOut) <- get
+    value1 <- liftEither (resolveParameter memory param1)
+    value2 <- liftEither (resolveParameter memory param2)
+    let valueToWrite = if value1 == value2 then 1 :: Int else 0
+    put (MkState (nextInstructionPointer instructionSpec instructionPointer) (AL.replace outputAddress valueToWrite memory) stdIn stdOut)
+    return stdOut
 
 resolveParameter :: AddressableMemory -> Param mode -> Either ErrorMessage Int
 resolveParameter _ (Imm value) = Right value
