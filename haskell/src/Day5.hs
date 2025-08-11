@@ -56,63 +56,47 @@ deriving instance Show Instruction
 data InstructionSpec = InstructionSpec
     { instructionName :: String
     , parameterCount :: Int
-    , builder :: [AnyParam] -> Either ErrorMessage Instruction
+    , builder :: InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
     }
 
 instructionTable :: M.Map Int InstructionSpec
 instructionTable =
     M.fromList
-        [ (1, InstructionSpec "Add" 3 buildAdd)
-        , (2, InstructionSpec "Multiply" 3 buildMultiply)
-        , (3, InstructionSpec "Read" 1 buildRead)
-        , (4, InstructionSpec "Write" 1 buildWrite)
-        , (5, InstructionSpec "Jump-If-True" 2 buildJumpIfTrue)
-        , (6, InstructionSpec "Jump-If-False" 2 buildJumpIfFalse)
-        , (7, InstructionSpec "LessThan" 3 buildLessThan)
-        , (8, InstructionSpec "Equals" 3 buildEquals)
-        , (99, InstructionSpec "Halt" 0 buildHalt)
+        [ (1, InstructionSpec "Add" 3 (buildAnyAnyPos Add))
+        , (2, InstructionSpec "Multiply" 3 (buildAnyAnyPos Multiply))
+        , (3, InstructionSpec "Read" 1 (buildPos Read))
+        , (4, InstructionSpec "Write" 1 (buildAny Write))
+        , (5, InstructionSpec "Jump-If-True" 2 (buildAnyAny JumpIfTrue))
+        , (6, InstructionSpec "Jump-If-False" 2 (buildAnyAny JumpIfFalse))
+        , (7, InstructionSpec "LessThan" 3 (buildAnyAnyPos LessThan))
+        , (8, InstructionSpec "Equals" 3 (buildAnyAnyPos Equals))
+        , (99, InstructionSpec "Halt" 0 (buildEmpty Halt))
         ]
+
+buildEmpty :: Instruction -> InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
+buildEmpty f _ [] = Right f
+buildEmpty _ spec params = Left (buildError spec params)
+
+buildAnyAnyPos :: (AnyParam -> AnyParam -> Param Position -> Instruction) -> InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
+buildAnyAnyPos f _ [anyParam1, anyParam2, AnyParam position@(Pos _)] = Right (f anyParam1 anyParam2 position)
+buildAnyAnyPos _ spec params = Left (buildError spec params)
+
+buildPos :: (Param Position -> Instruction) -> InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
+buildPos f _ [AnyParam position@(Pos _)] = Right (f position)
+buildPos _ spec params = Left (buildError spec params)
+
+buildAny :: (AnyParam -> Instruction) -> InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
+buildAny f _ [anyParam] = Right (f anyParam)
+buildAny _ spec params = Left (buildError spec params)
+
+buildAnyAny :: (AnyParam -> AnyParam -> Instruction) -> InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
+buildAnyAny f _ [anyParam1, anyParam2] = Right (f anyParam1 anyParam2)
+buildAnyAny _ spec params = Left (buildError spec params)
 
 type InstructionAndSpec = (Instruction, InstructionSpec)
 
-buildAdd :: [AnyParam] -> Either ErrorMessage Instruction
-buildAdd [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Add param1 param2 outputAddress)
-buildAdd xs = Left (buildError "Add" xs)
-
-buildMultiply :: [AnyParam] -> Either ErrorMessage Instruction
-buildMultiply [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Multiply param1 param2 outputAddress)
-buildMultiply xs = Left (buildError "Multiply" xs)
-
-buildRead :: [AnyParam] -> Either ErrorMessage Instruction
-buildRead [AnyParam outputAddress@(Pos _)] = Right (Read outputAddress)
-buildRead xs = Left (buildError "Read" xs)
-
-buildWrite :: [AnyParam] -> Either ErrorMessage Instruction
-buildWrite [param] = Right (Write param)
-buildWrite xs = Left (buildError "Write" xs)
-
-buildHalt :: [AnyParam] -> Either ErrorMessage Instruction
-buildHalt [] = Right Halt
-buildHalt xs = Left (buildError "Halt" xs)
-
-buildJumpIfTrue :: [AnyParam] -> Either ErrorMessage Instruction
-buildJumpIfTrue [param1, param2] = Right (JumpIfTrue param1 param2)
-buildJumpIfTrue xs = Left (buildError "Jump-If-True" xs)
-
-buildJumpIfFalse :: [AnyParam] -> Either ErrorMessage Instruction
-buildJumpIfFalse [param1, param2] = Right (JumpIfFalse param1 param2)
-buildJumpIfFalse xs = Left (buildError "Jump-If-False" xs)
-
-buildLessThan :: [AnyParam] -> Either ErrorMessage Instruction
-buildLessThan [param1, param2, AnyParam outputAddress@(Pos _)] = Right (LessThan param1 param2 outputAddress)
-buildLessThan xs = Left (buildError "LessThan" xs)
-
-buildEquals :: [AnyParam] -> Either ErrorMessage Instruction
-buildEquals [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Equals param1 param2 outputAddress)
-buildEquals xs = Left (buildError "Equals" xs)
-
-buildError :: String -> [AnyParam] -> String
-buildError instructionName' params = printf "Unable to create %s instruction from parameters %s" instructionName' (show params)
+buildError :: InstructionSpec -> [AnyParam] -> String
+buildError instructionSpec params = printf "Unable to create %s instruction from parameters %s" (instructionName instructionSpec) (show params)
 
 newtype StdIn = MkStdIn [Int] deriving (Show)
 newtype StdOut = MkStdOut [Int] deriving (Show)
@@ -150,7 +134,7 @@ getInstructionAndSpec opcode instructionPointer memory = do
             Right
             (M.lookup (O.instructionCode opcode) instructionTable)
     parameters <- getInstructionParams instructionSpec (O.orderedParameterModes opcode) instructionPointer memory
-    instruction <- builder instructionSpec parameters
+    instruction <- builder instructionSpec instructionSpec parameters
     Right (instruction, instructionSpec)
 
 getInstructionParams :: InstructionSpec -> [O.ParameterMode] -> InstructionPointer -> AddressableMemory -> Either ErrorMessage [AnyParam]
