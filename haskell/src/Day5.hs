@@ -59,6 +59,14 @@ data InstructionSpec = InstructionSpec
     , builder :: InstructionSpec -> [AnyParam] -> Either ErrorMessage Instruction
     }
 
+type InstructionAndSpec = (Instruction, InstructionSpec)
+
+newtype StdIn = MkStdIn [Int] deriving (Show)
+newtype StdOut = MkStdOut [Int] deriving (Show)
+data ApplicationState = MkState InstructionPointer AddressableMemory StdIn StdOut deriving (Show)
+
+type AppM = StateT ApplicationState (Either ErrorMessage) StdOut
+
 instructionTable :: M.Map Int InstructionSpec
 instructionTable =
     M.fromList
@@ -93,16 +101,8 @@ buildAnyAny :: (AnyParam -> AnyParam -> Instruction) -> InstructionSpec -> [AnyP
 buildAnyAny f _ [anyParam1, anyParam2] = Right (f anyParam1 anyParam2)
 buildAnyAny _ spec params = Left (buildError spec params)
 
-type InstructionAndSpec = (Instruction, InstructionSpec)
-
 buildError :: InstructionSpec -> [AnyParam] -> String
 buildError instructionSpec params = printf "Unable to create %s instruction from parameters %s" (instructionName instructionSpec) (show params)
-
-newtype StdIn = MkStdIn [Int] deriving (Show)
-newtype StdOut = MkStdOut [Int] deriving (Show)
-data ApplicationState = MkState InstructionPointer AddressableMemory StdIn StdOut deriving (Show)
-
-type AppM = StateT ApplicationState (Either ErrorMessage) StdOut
 
 read :: StdIn -> (Maybe Int, StdIn)
 read (MkStdIn []) = (Nothing, MkStdIn [])
