@@ -1,4 +1,6 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Day5 (runDay5) where
 
@@ -21,25 +23,38 @@ import Text.Printf (printf)
 
 type ErrorMessage = String
 type AddressableMemory = AL.AddressableList Int
-data Param = Immediate Int | Position Int deriving (Show)
+
 newtype InstructionPointer = MkInstructionPointer Int deriving (Show)
 
-data Instruction
-    = Add Param Param Param
-    | Multiply Param Param Param
-    | Halt
-    | Read Param
-    | Write Param
-    | JumpIfTrue Param Param
-    | JumpIfFalse Param
-    | LessThan Param Param Param
-    | Equals Param Param Param
-    deriving (Show)
+data Immediate
+data Position
+
+data Param mode where
+    Imm :: Int -> Param Immediate
+    Pos :: Int -> Param Position
+
+deriving instance Show (Param mode)
+
+data AnyParam where
+    AnyParam :: Param mode -> AnyParam
+
+deriving instance Show AnyParam
+
+data Instruction where
+    Add :: AnyParam -> AnyParam -> Param Position -> Instruction
+    Multiply :: AnyParam -> AnyParam -> Param Position -> Instruction
+    Halt :: Instruction
+    Read :: Param Position -> Instruction
+    Write :: AnyParam -> Instruction
+    JumpIfTrue :: AnyParam -> AnyParam -> Instruction
+    JumpIfFalse :: AnyParam -> AnyParam -> Instruction
+    LessThan :: AnyParam -> AnyParam -> Param Position -> Instruction
+    Equals :: AnyParam -> AnyParam -> Param Position -> Instruction
 
 data InstructionSpec = InstructionSpec
     { instructionName :: String
     , parameterCount :: Int
-    , builder :: [Param] -> Either ErrorMessage Instruction
+    , builder :: [AnyParam] -> Either ErrorMessage Instruction
     }
 
 instructionTable :: M.Map Int InstructionSpec
@@ -50,8 +65,8 @@ instructionTable =
 
 type InstructionAndSpec = (Instruction, InstructionSpec)
 
-buildAdd :: [Param] -> Either ErrorMessage Instruction
-buildAdd [p1, p2, p3@(Position _)] = Right (Add p1 p2 p3)
+buildAdd :: [AnyParam] -> Either ErrorMessage Instruction
+buildAdd [param1, param2, AnyParam outputAddress@(Pos _)] = Right (Add param1 param2 outputAddress)
 buildAdd xs = Left (printf "Unable to create Add instructions from parameters %s" (show xs))
 
 newtype StdIn = MkStdIn [Int] deriving (Show)
@@ -93,10 +108,10 @@ getInstructionAndSpec opcode instructionPointer memory = do
     instruction <- builder instructionSpec parameters
     Right (instruction, instructionSpec)
 
-getInstructionParams :: InstructionSpec -> [O.ParameterMode] -> InstructionPointer -> AddressableMemory -> Either ErrorMessage [Param]
+getInstructionParams :: InstructionSpec -> [O.ParameterMode] -> InstructionPointer -> AddressableMemory -> Either ErrorMessage [AnyParam]
 getInstructionParams instructionSpec parameterModes (MkInstructionPointer address) memory =
     let
-        getInstructionParams' :: Int -> [O.ParameterMode] -> AL.Address -> AddressableMemory -> [Either ErrorMessage Param]
+        getInstructionParams' :: Int -> [O.ParameterMode] -> AL.Address -> AddressableMemory -> [Either ErrorMessage AnyParam]
         getInstructionParams' 0 _ _ _ = []
         getInstructionParams' count modes currentAddress memory' =
             let maybeHeadAndTail = uncons modes
@@ -106,16 +121,16 @@ getInstructionParams instructionSpec parameterModes (MkInstructionPointer addres
      in
         sequence $ getInstructionParams' (parameterCount instructionSpec) parameterModes (address + 1) memory
 
-translate :: O.ParameterMode -> Int -> Param
-translate O.Position = Position
-translate O.Immediate = Immediate
+translate :: O.ParameterMode -> Int -> AnyParam
+translate O.Immediate = AnyParam . Imm
+translate O.Position = AnyParam . Pos
 
 nextInstructionPointer :: InstructionSpec -> InstructionPointer -> InstructionPointer
 nextInstructionPointer instructionSpec (MkInstructionPointer address) =
     MkInstructionPointer (address + parameterCount instructionSpec + 1)
 
 applyInstruction :: InstructionAndSpec -> AppM
-applyInstruction (Add param1 param2 (Position outputAddress), instructionSpec) = do
+applyInstruction (Add (AnyParam param1) (AnyParam param2) (Pos outputAddress), instructionSpec) = do
     (MkState instructionPointer memory stdIn stdOut) <- get
     addend1 <- liftEither $ resolveParameter memory param1
     addend2 <- liftEither $ resolveParameter memory param2
@@ -123,9 +138,9 @@ applyInstruction (Add param1 param2 (Position outputAddress), instructionSpec) =
     return stdOut
 applyInstruction _ = liftEither (Left "Error!")
 
-resolveParameter :: AddressableMemory -> Param -> Either ErrorMessage Int
-resolveParameter _ (Day5.Immediate value) = Right value
-resolveParameter memory (Day5.Position address) = AL.eitherLookup address memory
+resolveParameter :: AddressableMemory -> Param mode -> Either ErrorMessage Int
+resolveParameter _ (Imm value) = Right value
+resolveParameter memory (Pos address) = AL.eitherLookup address memory
 
 runDay5 :: IO ()
 runDay5 = do
